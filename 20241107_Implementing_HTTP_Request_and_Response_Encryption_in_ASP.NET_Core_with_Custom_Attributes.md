@@ -145,6 +145,93 @@ public class SensitiveDataController : ControllerBase
 
 This ensures that both the request and response data are automatically encrypted and decrypted by the `HttpEncryptionAttributeFilter`.
 
+## Optional: Frontend Implementation using `Axios` and `crypto-js`
+
+### API Wrapper (Axios Interceptor)
+
+This file creates a custom Axios instance to handle API requests and responses. It encrypts query parameters and request data before sending them and decrypts the response data upon receiving it.
+
+```javascript
+import axios from 'axios';
+import { BASE_URL } from '../../constants/ServerEndpoints';
+import { decryptData, encryptData } from '../../utilities/encryptionUtils';
+
+const secureAPI = axios.create({ baseURL: BASE_URL });
+
+secureAPI.interceptors.request.use((config) => {
+  const [endpoint, queryParams] = config.url ? config.url.split('?') : [];
+
+  if (queryParams) {
+    config.url = `${endpoint}?${encryptData(queryParams)}`;
+  }
+
+  if (config.data) {
+    config.headers['Content-Type'] = 'application/json';
+    config.transformRequest = encryptData;
+  }
+
+  config.transformResponse = decryptData;
+
+  return config;
+});
+
+export default secureAPI;
+```
+
+### Encryption Utilities
+
+This file provides two utility functions, `encryptData` and `decryptData`, using AES encryption with a fixed key and IV. It securely encrypts input data (e.g., API requests) and decrypts ciphertext while handling JSON parsing.
+
+```javascript
+import CryptoJS from 'crypto-js';
+import { SECRET_KEY } from '../constants/envVariables';
+
+const keyString = SECRET_KEY.padEnd(32, '0');
+
+const encryptionKey = CryptoJS.enc.Utf8.parse(keyString.substring(0, 32));
+const initializationVector = CryptoJS.enc.Utf8.parse(keyString.substring(0, 16));
+
+const encryptionOptions = {
+  iv: initializationVector,
+  mode: CryptoJS.mode.CBC,
+  padding: CryptoJS.pad.Pkcs7
+};
+
+export const encryptData = (input) => {
+  if (input === null || input === undefined) return input;
+
+  const data = CryptoJS.enc.Utf8.parse(
+    typeof input === 'string' ? input : JSON.stringify(input)
+  );
+
+  const encrypted = CryptoJS.AES.encrypt(data, encryptionKey, encryptionOptions);
+
+  return CryptoJS.enc.Base64.stringify(encrypted.ciphertext);
+};
+
+export const decryptData = (encryptedInput) => {
+  if (!encryptedInput) return encryptedInput;
+
+  try {
+    const encryptedBytes = CryptoJS.enc.Base64.parse(encryptedInput);
+
+    const decrypted = CryptoJS.AES.decrypt(
+      { ciphertext: encryptedBytes },
+      encryptionKey,
+      encryptionOptions
+    ).toString(CryptoJS.enc.Utf8);
+
+    try {
+      return JSON.parse(decrypted);
+    } catch (_) {
+      return decrypted;
+    }
+  } catch (_) {
+    return encryptedInput;
+  }
+};
+```
+
 ## Conclusion
 
 This solution leverages ASP.NET Core's powerful middleware and filter mechanisms to seamlessly encrypt and decrypt HTTP request and response bodies. By using custom attributes and filters, you can secure sensitive data in your API without modifying the individual actions or controllers. This is particularly useful when you need to enforce encryption across an entire set of endpoints with minimal overhead.
